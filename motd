@@ -1,0 +1,130 @@
+#!/bin/bash
+
+# Setup for 92 character wide terminal
+declare -ir DateColumn=39 # Default is 27 for 80 character line, 34 for 92 character line
+declare -ir TimeColumn=66 # Default is 49 for 80 character line, 61 for 92 character line
+
+# Functions to add color to stdout.
+# The original function can be found with an explanation here: https://stackoverflow.com/a/16178979
+# Colors: 00=bright white, 31=red, 32=green, 33=yellow, 34=blue, 35=purple, 36=cyan, 37=white
+cal_color()(set -o pipefail; "$@" | sed $'s,.*,\e[32m&\e[m,')>&1
+# Adjust the color code here-------------------^^
+
+time_color()(set -o pipefail; "$@" | sed $'s,.*,\e[01;36m&\e[m,')>&1
+# Adjust the color code here-----------------------^^
+
+#--------- Weather --------------------------------
+print_weather() {
+declare -a weather=()
+readarray weather < <(curl wttr.in/?0 --silent --max-time 3)
+# Timeout #. Increase if using a slower connection--------^
+# Add your location to improve accuracy, instead of using your IP's location.
+# Visit https://wttr.in/:help or run "curl wttr.in/:help" for more info.
+
+if [[ "${#weather[@]}" -gt 0 ]]; then
+echo "${weather[@]}"
+else
+cat << EOF
++============================+
+|                            |
+|    Weather information     |
+|        unavailable.        |
+|     Please try again       |
+|           later.           |
+|                            |
++============================+
+EOF
+fi
+}
+
+#--------- Calendar -------------------------------
+print_calendar() {
+declare -a calendar=()
+readarray calendar < <(cal)
+
+tput sc # Save cursor position
+
+declare -i i=0
+while [ $((++i)) -lt 9 ]; do tput cuu1; done # Move up 8 lines
+
+for line in "${calendar[@]}"; do # Print calendar
+    tput cuf $DateColumn
+    cal_color printf "%s" "$line"
+done
+
+tput rc # Restore saved cursor position.
+}
+
+#-------- TIME ------------------------------------
+print_time() {
+declare TIME="$(date +%R)"
+
+tput sc
+
+declare -i i=0
+while [ $((++i)) -lt 8 ]; do tput cuu1; done # Move up 7 lines
+
+declare -a time=()
+if hash toilet 2>/dev/null; then # Do we have the toilet package?
+    readarray time < <(echo " $TIME " | toilet -f future --filter border)
+elif hash figlet 2>/dev/null; then # Do we have the figlet package?
+    readarray time < <(echo "$TIME" | figlet)
+else # else use standard font
+    readarray time < <(echo "$TIME")
+fi
+
+for line in "${time[@]}"; do # Print time
+    tput cuf $TimeColumn
+    time_color printf "%s" "$line"
+done
+
+tput rc
+}
+
+#-------- SYS INFO ------------------------------------
+print_system_info() {
+declare OS=$(grep PRETTY_NAME /etc/os-release | sed 's/^.*="//;s/"$//')
+declare UPTIME_DAYS=$(expr $(cat /proc/uptime | cut -d '.' -f1) % 31556926 / 86400)
+declare UPTIME_HOURS=$(expr $(cat /proc/uptime | cut -d '.' -f1) % 31556926 % 86400 / 3600)
+declare UPTIME_MINUTES=$(expr $(cat /proc/uptime | cut -d '.' -f1) % 31556926 % 86400 % 3600 / 60)
+declare IP=$(ifconfig wlan0 | grep "inet addr" | awk -F: '{print $2}' | awk '{print $1}')
+
+cat << EOF
+%                                                                            %
+%+++++++++++++++++++++++++++++++ System Info ++++++++++++++++++++++++++++++++%
+%                                                                            %
+  Hostname: $(hostname)
+  OS: $OS
+  Kernel: $(uname -r)
+  Uptime: $UPTIME_DAYS days, $UPTIME_HOURS hours, $UPTIME_MINUTES minutes
+  IP: $IP
+EOF
+}
+
+#-------- SYS LOAD ------------------------------------
+print_system_load() {
+declare CPU_LOAD="$(cat /proc/loadavg | awk '{print $1 ", " $2 ", " $3}')"
+declare MEM_USED="$(free -h | head -n 2 | tail -n 1 | awk {'print $4'})"
+declare MEM_TOTAL="$(free -h | head -n 2 | tail -n 1 | awk {'print $2'})"
+declare SWAP_USED="$(free -h | tail -n 1 | awk {'print $4'})"
+declare SWAP_TOTAL="$(free -h | tail -n 1 | awk {'print $2'})"
+declare DISK_USED="$(df -h / | tail -n 1 | awk '{ print $2 }')i"
+declare DISK_TOTAL="$(df -h / | tail -n 1 | awk '{ print $1 }')i"
+
+cat << EOF
+%                                                                            %
+%+++++++++++++++++++++++++++++++ System Load ++++++++++++++++++++++++++++++++%
+%                                                                            %
+  CPU: ${CPU_LOAD}
+  Memory: ${MEM_USED} used of ${MEM_TOTAL}
+  Swap: ${SWAP_USED} used of ${SWAP_TOTAL}
+  Disk: ${DISK_USED} used of ${DISK_TOTAL}
+EOF
+}
+
+print_weather
+print_calendar
+print_time
+print_system_info
+print_system_load
+exit 0
